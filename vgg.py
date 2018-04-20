@@ -26,7 +26,8 @@ def load_net(data_path):
     mean = data['normalization'][0][0][0]
     mean_pixel = np.mean(mean, axis=(0, 1))
     weights = data['layers'][0]
-    return weights, mean_pixel
+    classes = [p[0] for p in data["classes"][0][0][1][0]]
+    return weights, mean_pixel, classes
 
 def net_preloaded(weights, input_image, pooling):
     net = {}
