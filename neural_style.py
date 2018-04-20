@@ -12,11 +12,14 @@ from argparse import ArgumentParser
 
 from PIL import Image
 
+
 # default arguments
 CONTENT_WEIGHT = 5e0
 CONTENT_WEIGHT_BLEND = 1
 STYLE_WEIGHT = 5e2
 TV_WEIGHT = 1e2
+COLOR_WEIGHT = 1e4
+AFFINE_WEIGHT = 0
 STYLE_LAYER_WEIGHT_EXP = 1
 LEARNING_RATE = 1e1
 BETA1 = 0.9
@@ -79,6 +82,12 @@ def build_parser():
     parser.add_argument('--tv-weight', type=float,
             dest='tv_weight', help='total variation regularization weight (default %(default)s)',
             metavar='TV_WEIGHT', default=TV_WEIGHT)
+    parser.add_argument('--color-weight', type=float,
+            dest='color_weight', help='color constraint weight (default %(default)s)',
+            metavar='COLOR_WEIGHT', default=COLOR_WEIGHT)
+    parser.add_argument('--affine-weight', type=float,
+            dest='affine_weight', help='affine constraint weight (default %(default)s)',
+            metavar='AFFINE_WEIGHT', default=AFFINE_WEIGHT)
     parser.add_argument('--learning-rate', type=float,
             dest='learning_rate', help='learning rate (default %(default)s)',
             metavar='LEARNING_RATE', default=LEARNING_RATE)
@@ -147,8 +156,8 @@ def main():
         # Neither inital, nor noiseblend is provided, falling back to random generated initial guess
         if options.initial_noiseblend is None:
             options.initial_noiseblend = 1.0
-        if options.initial_noiseblend < 1.0:
-            initial = content_image
+        #if options.initial_noiseblend < 1.0:
+        #    initial = content_image
 
     if options.checkpoint_output and "%s" not in options.checkpoint_output:
         parser.error("To save intermediate images, the checkpoint output "
@@ -171,6 +180,8 @@ def main():
         content_weight=options.content_weight,
         content_weight_blend=options.content_weight_blend,
         style_weight=options.style_weight,
+        color_weight=options.color_weight,
+        affine_weight=options.affine_weight,
         style_layer_weight_exp=options.style_layer_weight_exp,
         style_blend_weights=style_blend_weights,
         tv_weight=options.tv_weight,

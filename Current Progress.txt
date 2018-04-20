@@ -1,0 +1,13 @@
+1. Add Color loss:
+
+Improve shape preservation
+
+Help doing colorization
+
+2. Refine With original output:
+
+use original output as style image:
+
+Obeservation: The output image is slightly twisted version of original one.
+
+Use as proper draft. Help finetune image detail/ Optimize in order.
