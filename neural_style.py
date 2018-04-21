@@ -20,6 +20,7 @@ STYLE_WEIGHT = 1e2
 TV_WEIGHT = 1e2
 COLOR_WEIGHT = 0
 AFFINE_WEIGHT = 0
+EDGE_WEIGHT = 1e8
 STYLE_LAYER_WEIGHT_EXP = 1
 LEARNING_RATE = 1e1
 BETA1 = 0.9
@@ -88,6 +89,9 @@ def build_parser():
     parser.add_argument('--affine-weight', type=float,
             dest='affine_weight', help='affine constraint weight (default %(default)s)',
             metavar='AFFINE_WEIGHT', default=AFFINE_WEIGHT)
+    parser.add_argument('--edge-weight', type=float,
+            dest='edge_weight', help='edge constraint weight (default %(default)s)',
+            metavar='EDGE_WEIGHT', default=EDGE_WEIGHT)
     parser.add_argument('--learning-rate', type=float,
             dest='learning_rate', help='learning rate (default %(default)s)',
             metavar='LEARNING_RATE', default=LEARNING_RATE)
@@ -182,6 +186,7 @@ def main():
         style_weight=options.style_weight,
         color_weight=options.color_weight,
         affine_weight=options.affine_weight,
+        edge_weight=options.edge_weight,
         style_layer_weight_exp=options.style_layer_weight_exp,
         style_blend_weights=style_blend_weights,
         tv_weight=options.tv_weight,

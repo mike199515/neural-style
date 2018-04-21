@@ -17,7 +17,10 @@ Use as proper draft. Help finetune image detail/ Optimize in order.
 
 (a) Spatially mix the style throughout layers. - How to solve boundary not smooth?
 
-(c) Gradual switch of style.=> have a try on that. Approach switch weight linearly. Start with style A image.
-
 (b) embed into different representations: Weight on different layers
+
+
+4. How to preserve edge?
+
+Use edge detector as a loss: not work at all.
 

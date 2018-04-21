@@ -11,6 +11,7 @@ import time
 
 from PIL import Image
 from closed_form_matting import getLaplacian
+from edge_detection import TF_Canny
 
 CONTENT_LAYERS = ('relu4_2', 'relu5_2')
 STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
@@ -44,7 +45,7 @@ def get_style_layers_weights(style_layer_weight_exp):
 def get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content):
     content_features = {}
     g = tf.Graph()
-    with g.as_default(), g.device('/cpu:0'), tf.Session() as sess:
+    with g.as_default(), g.device('/gpu:0'), tf.Session() as sess:
         image = tf.placeholder('float', shape=shape)
         net = vgg.net_preloaded(vgg_weights, image, pooling)
         content_pre = np.array([vgg.preprocess(content, vgg_mean_pixel)])
@@ -52,17 +53,27 @@ def get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content):
             content_features[layer] = net[layer].eval(feed_dict={image: content_pre})
     return content_features
 
-def get_content_gray(content, vgg_mean_pixel):
-    content_pre = np.array([vgg.preprocess(content, vgg_mean_pixel)])
-    content_gray = rgb2gray(content_pre)  # mathematically the same thing
+def get_content_gray(content):
+    content_gray = rgb2gray(content)  # mathematically the same thing
     return content_gray
 
+def get_content_edge(content):
+    g = tf.Graph()
+    with g.as_default(), tf.Session() as sess:
+        image = tf.placeholder('float', shape=content.shape)
+        rgb2gray_vec = tf.constant(RGB2GRAY_VEC)
+        image_gray = tf.tensordot(image, rgb2gray_vec, axes=[[2], [0]])
+        x_tensor = tf.expand_dims(tf.expand_dims(image_gray, axis=0),-1)
+        edge_result = TF_Canny(x_tensor, return_raw_edges=False)
+        edge_detection = edge_result.eval(feed_dict={image:content})
+    return edge_detection
+    
 def get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling):
     style_features = [{} for _ in styles]
     style_shapes = [(1,) + style.shape for style in styles]
     for i in range(len(styles)):
         g = tf.Graph()
-        with g.as_default(), g.device('/cpu:0'), tf.Session() as sess:
+        with g.as_default(), g.device('/gpu:0'), tf.Session() as sess:
             image = tf.placeholder('float', shape=style_shapes[i])
             net = vgg.net_preloaded(vgg_weights, image, pooling)
             style_pre = np.array([vgg.preprocess(styles[i], vgg_mean_pixel)])
@@ -95,7 +106,7 @@ def get_content_loss(content_weight, content_weight_blend, content_features, net
                                                                                             content_layer].size))
     content_loss += reduce(tf.add, content_losses)
     return content_loss
-
+    
 def get_split_from_layer(layer,i, n):
     _, h, w, c = map(lambda i: i.value, layer.get_shape())
     h_begin = max(int(h*(i*1./n)),0)
@@ -137,10 +148,14 @@ def get_color_loss(image, content_gray, color_weight):
     return color_loss
 
 def get_edge_loss(image, content_edge, edge_weight):
-    pass
+    rgb2gray_vec = tf.constant(RGB2GRAY_VEC)
+    image_gray = tf.tensordot(image, rgb2gray_vec, axes=[[3], [0]])
+    x_tensor = tf.expand_dims(image_gray,-1)
+    image_edge = TF_Canny(x_tensor, return_raw_edges=False)
+    return edge_weight * tf.nn.l2_loss(image_edge-content_edge)/_tensor_size(image_edge)
     
 def stylize(network, initial, initial_noiseblend, content, styles, preserve_colors, iterations,
-        content_weight, content_weight_blend, style_weight, color_weight, affine_weight, style_layer_weight_exp, style_blend_weights, tv_weight,
+        content_weight, content_weight_blend, style_weight, color_weight, affine_weight, edge_weight, style_layer_weight_exp, style_blend_weights, tv_weight,
         learning_rate, beta1, beta2, epsilon, pooling,
         print_iterations=None, checkpoint_iterations=None):
     """
@@ -156,24 +171,26 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
     #content = gray2rgb(rgb2gray(content)) # make sure it is gray scale!
     style_layers_weights = get_style_layers_weights(style_layer_weight_exp)
     vgg_weights, vgg_mean_pixel, _ = vgg.load_net(network)
-    content_gray = get_content_gray(content, vgg_mean_pixel)
+    content_gray = get_content_gray(content)
     content_features = get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content)
+    content_edge = get_content_edge(content)
     style_features = get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling)
 
     # make stylized image using backpropogation
     with tf.Graph().as_default():
-        content_laplacian = tf.to_float(getLaplacian(content / 255.))
-        initial = tf.random_normal(shape) * 0.256
+        #content_laplacian = tf.to_float(getLaplacian(content / 255.))
+        initial = tf.random_normal(shape) * 0.256 + vgg_mean_pixel
         image = tf.Variable(initial)
-        net = vgg.net_preloaded(vgg_weights, image, pooling)
+        image_pre = image - vgg_mean_pixel
+        net = vgg.net_preloaded(vgg_weights, image_pre, pooling)
         content_loss =  get_content_loss(content_weight, content_weight_blend, content_features, net) if content_weight!=0 else 0
         style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_blend_weights)
         tv_loss = get_tv_loss(image, tv_weight, shape) if tv_weight!=0 else 0
         color_loss = get_color_loss(image,content_gray,color_weight) if color_weight!=0 else 0
         affine_loss = get_affine_loss(image, content_laplacian, affine_weight) if affine_weight!=0 else 0
-
+        edge_loss = get_edge_loss(image, content_edge, edge_weight) if edge_weight!=0 else 0
         #loss = content_loss + style_loss + tv_loss
-        loss = color_loss + content_loss + style_loss + tv_loss + affine_loss
+        loss = color_loss + content_loss + style_loss + tv_loss + affine_loss + edge_loss
 
         # optimizer setup
         train_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(loss)
@@ -184,6 +201,7 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
             if tv_weight != 0: stderr.write('       tv loss: %g\n' % tv_loss.eval())
             if color_weight != 0: stderr.write('  color loss: %g\n' % color_loss.eval())
             if affine_weight!= 0: stderr.write('    affine loss: %g\n' % affine_loss.eval())
+            if edge_loss!=0 : stderr.write('    edge loss: %g\n' % edge_loss.eval())
             stderr.write('    total loss: %g\n' % loss.eval())
         # optimization
         for iteration, img_out in do_optimization(image, content, loss, shape, vgg_mean_pixel, print_iterations,print_progress, iterations, train_step, checkpoint_iterations, preserve_colors):
@@ -225,7 +243,7 @@ def do_optimization(image, content, loss, shape, vgg_mean_pixel, print_iteration
                     best_loss = this_loss
                     best = image.eval()
 
-                img_out = vgg.unprocess(best.reshape(shape[1:]), vgg_mean_pixel)
+                img_out = best.reshape(shape[1:])
 
                 if preserve_colors and preserve_colors == True:
                     img_out =  preserve_color(content, img_out)
