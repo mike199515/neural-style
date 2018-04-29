@@ -27,6 +27,9 @@ try:
 except NameError:
     from functools import reduce
 
+def get_normalization_factor(feat_vector):
+    return 1./feat_vector.std()
+
 def get_style_layers_weights(style_layer_weight_exp):
     layer_weight = 1.0
     style_layers_weights = {}
@@ -41,7 +44,7 @@ def get_style_layers_weights(style_layer_weight_exp):
     for style_layer in STYLE_LAYERS:
         style_layers_weights[style_layer] /= layer_weights_sum
     return style_layers_weights
-        
+
 def get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content):
     content_features = {}
     g = tf.Graph()
@@ -67,7 +70,7 @@ def get_content_edge(content):
         edge_result = TF_Canny(x_tensor, return_raw_edges=False)
         edge_detection = edge_result.eval(feed_dict={image:content})
     return edge_detection
-    
+
 def get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling):
     style_features = [{} for _ in styles]
     style_shapes = [(1,) + style.shape for style in styles]
@@ -92,7 +95,7 @@ def get_affine_loss(output_image, content_laplacian, affine_weight):
         loss_affine += tf.matmul(tf.expand_dims(Vc_ravel, 0), tf.sparse_tensor_dense_matmul(content_laplacian, tf.expand_dims(Vc_ravel, -1)))
     return loss_affine * affine_weight
 
-def get_content_loss(content_weight, content_weight_blend, content_features, net):
+def get_content_loss(content_weight, content_weight_blend, content_features, content_normalized_factors, net):
     content_layers_weights = {}
     content_layers_weights['relu4_2'] = content_weight_blend
     content_layers_weights['relu5_2'] = 1.0 - content_weight_blend
@@ -100,21 +103,21 @@ def get_content_loss(content_weight, content_weight_blend, content_features, net
     content_loss = 0
     content_losses = []
     for content_layer in CONTENT_LAYERS:
-        content_losses.append(content_layers_weights[content_layer] * content_weight * (2 * tf.nn.l2_loss(
+        content_losses.append(content_layers_weights[content_layer] * content_weight * content_normalized_factors[content_layer] * (2 * tf.nn.l2_loss(
             net[content_layer] - content_features[content_layer]) /
                                                                                         content_features[
                                                                                             content_layer].size))
     content_loss += reduce(tf.add, content_losses)
     return content_loss
-    
+
 def get_split_from_layer(layer,i, n):
     _, h, w, c = map(lambda i: i.value, layer.get_shape())
     h_begin = max(int(h*(i*1./n)),0)
     h_end = min(int(h*((i+1)*1./n)),h)
     return layer[:, h_begin:h_end]
-    
-    
-def get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_blend_weights):
+
+
+def get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights):
     style_loss = 0
     for i in range(len(styles)):
         style_losses = []
@@ -126,6 +129,7 @@ def get_style_loss(styles, net, style_features, style_layers_weights, style_weig
             gram = tf.matmul(tf.transpose(feats), feats) / size
             style_gram = STYLE_WEIGHT[style_layer][i] * style_features[i][style_layer] if len(styles)==2 else style_features[i][style_layer]
             style_losses.append(
+                style_normalized_factors[i][style_layer] *
                 style_layers_weights[style_layer] * 2 * tf.nn.l2_loss(gram - style_gram) / style_gram.size)
         style_loss += style_weight * style_blend_weights[i] * reduce(tf.add, style_losses)
     return style_loss
@@ -153,7 +157,7 @@ def get_edge_loss(image, content_edge, edge_weight):
     x_tensor = tf.expand_dims(image_gray,-1)
     image_edge = TF_Canny(x_tensor, return_raw_edges=False)
     return edge_weight * tf.nn.l2_loss(image_edge-content_edge)/_tensor_size(image_edge)
-    
+
 def stylize(network, initial, initial_noiseblend, content, styles, preserve_colors, iterations,
         content_weight, content_weight_blend, style_weight, color_weight, affine_weight, edge_weight, style_layer_weight_exp, style_blend_weights, tv_weight,
         learning_rate, beta1, beta2, epsilon, pooling,
@@ -171,20 +175,22 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
     #content = gray2rgb(rgb2gray(content)) # make sure it is gray scale!
     style_layers_weights = get_style_layers_weights(style_layer_weight_exp)
     vgg_weights, vgg_mean_pixel, _ = vgg.load_net(network)
-    content_gray = get_content_gray(content)
+    if color_weight!=0: content_gray = get_content_gray(content)
+    if edge_weight!=0: content_edge = get_content_edge(content)
     content_features = get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content)
-    content_edge = get_content_edge(content)
     style_features = get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling)
-
+    content_normalized_factors = {name:get_normalization_factor(vec) for name,vec in content_features.items()}
+    style_normalized_factors = [{name: get_normalization_factor(vec) for name, vec in style.items()} for style in style_features]
+    print(content_normalized_factors,style_normalized_factors)
     # make stylized image using backpropogation
     with tf.Graph().as_default():
-        #content_laplacian = tf.to_float(getLaplacian(content / 255.))
+        if affine_weight != 0: content_laplacian = tf.to_float(getLaplacian(content / 255.))
         initial = tf.random_normal(shape) * 0.256 + vgg_mean_pixel
         image = tf.Variable(initial)
         image_pre = image - vgg_mean_pixel
         net = vgg.net_preloaded(vgg_weights, image_pre, pooling)
-        content_loss =  get_content_loss(content_weight, content_weight_blend, content_features, net) if content_weight!=0 else 0
-        style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_blend_weights)
+        content_loss =  get_content_loss(content_weight, content_weight_blend, content_features,content_normalized_factors, net) if content_weight!=0 else 0
+        style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights)
         tv_loss = get_tv_loss(image, tv_weight, shape) if tv_weight!=0 else 0
         color_loss = get_color_loss(image,content_gray,color_weight) if color_weight!=0 else 0
         affine_loss = get_affine_loss(image, content_laplacian, affine_weight) if affine_weight!=0 else 0
