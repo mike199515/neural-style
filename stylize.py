@@ -48,7 +48,7 @@ def get_style_layers_weights(style_layer_weight_exp):
 def get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content):
     content_features = {}
     g = tf.Graph()
-    with g.as_default(), g.device('/gpu:0'), tf.Session() as sess:
+    with g.as_default(), tf.Session() as sess:
         image = tf.placeholder('float', shape=shape)
         net = vgg.net_preloaded(vgg_weights, image, pooling)
         content_pre = np.array([vgg.preprocess(content, vgg_mean_pixel)])
@@ -76,7 +76,7 @@ def get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling):
     style_shapes = [(1,) + style.shape for style in styles]
     for i in range(len(styles)):
         g = tf.Graph()
-        with g.as_default(), g.device('/gpu:0'), tf.Session() as sess:
+        with g.as_default(), tf.Session() as sess:
             image = tf.placeholder('float', shape=style_shapes[i])
             net = vgg.net_preloaded(vgg_weights, image, pooling)
             style_pre = np.array([vgg.preprocess(styles[i], vgg_mean_pixel)])
@@ -158,6 +158,41 @@ def get_edge_loss(image, content_edge, edge_weight):
     image_edge = TF_Canny(x_tensor, return_raw_edges=False)
     return edge_weight * tf.nn.l2_loss(image_edge-content_edge)/_tensor_size(image_edge)
 
+def save_gram(gram_dict, name):
+    for i in gram_dict[0].keys():
+        np.save(f"{name}_{i}", gram_dict[0][i])
+    return
+
+def approx_style(target, bases):
+
+    from sklearn import linear_model
+    ls = linear_model.LinearRegression()
+
+    base_size = len(bases)
+    approx_styles = {}
+
+    for l in STYLE_LAYERS:
+        print(f"Layer: {l}")
+        G_mat = target[l]
+        G = G_mat.reshape(-1)
+
+        H_mat = [h[l] for h in bases]
+        H_s = np.array([h.reshape(-1) for h in H_mat])
+        print(G.shape, H_s.shape)
+        ls.fit(H_s.T, G)
+        coeff = ls.coef_
+        print(f"Coeff: {coeff}")
+
+        combined = np.zeros_like(G_mat)
+        for i in range(base_size):
+            combined += coeff[i] * H_mat[i]
+
+        approx_styles[l] = combined
+        # res = G_mat - H_mat
+        # print(np.sum(res) / len(G))
+    return [approx_styles]
+
+
 def stylize(network, initial, initial_noiseblend, content, styles, preserve_colors, iterations,
         content_weight, content_weight_blend, style_weight, color_weight, affine_weight, edge_weight, style_layer_weight_exp, style_blend_weights, tv_weight,
         learning_rate, beta1, beta2, epsilon, pooling,
@@ -178,7 +213,9 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
     if color_weight!=0: content_gray = get_content_gray(content)
     if edge_weight!=0: content_edge = get_content_edge(content)
     content_features = get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content)
-    style_features = get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling)
+    multiple_styles = get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling)
+    style_features = approx_style(target=multiple_styles[0], bases=multiple_styles[1:])
+
     content_normalized_factors = {name:get_normalization_factor(vec) for name,vec in content_features.items()}
     style_normalized_factors = [{name: get_normalization_factor(vec) for name, vec in style.items()} for style in style_features]
     print(content_normalized_factors,style_normalized_factors)
@@ -190,7 +227,7 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
         image_pre = image - vgg_mean_pixel
         net = vgg.net_preloaded(vgg_weights, image_pre, pooling)
         content_loss =  get_content_loss(content_weight, content_weight_blend, content_features,content_normalized_factors, net) if content_weight!=0 else 0
-        style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights)
+        style_loss = get_style_loss(style_features, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights)
         tv_loss = get_tv_loss(image, tv_weight, shape) if tv_weight!=0 else 0
         color_loss = get_color_loss(image,content_gray,color_weight) if color_weight!=0 else 0
         affine_loss = get_affine_loss(image, content_laplacian, affine_weight) if affine_weight!=0 else 0
