@@ -1,0 +1,11 @@
+0.[Done] Refactor the code to support the following requirements.
+
+1. [Done] Run image of apple with mixing features horizontally. w/o normalization.
+
+2. [Done] Run the image with horizontally mixed features, but the first two layers  are only mixture of styles. ¡ª hybrid setting.
+
+3. [Done] Run image of apple with mixing factor [0.5,0.5] for all layers, and also factor [1,0],[1,0],[0,1],[0,1] for the four layers. (Show how the mixing affects.)
+
+4. [Done] Run image of apple without using normalization technique in mixing examples. i.e., checkout to former version and do the experiments. (Show how normalization helps)
+
+5. In the report, remove the part about colorization and change words accordingly.

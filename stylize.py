@@ -19,16 +19,21 @@ STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
 #STYLE_LAYERS = ('relu3_1', 'relu4_1', 'relu5_1')
 RGB2GRAY_VEC = [0.299, 0.587, 0.114]
 
-STYLE_WEIGHT = {'relu1_1':[0,1], 'relu2_1':[0.25,0.75], 'relu3_1':[0.5,0.5],"relu4_1":[0.75,0.25],"relu5_1":[1,0]}
-
+#STYLE_WEIGHT = {'relu1_1':[0,1], 'relu2_1':[0.25,0.75], 'relu3_1':[0.5,0.5],"relu4_1":[0.75,0.25],"relu5_1":[1,0]}
+STYLE_WEIGHT = {'relu1_1':[0.5,0.5], 'relu2_1':[0.5,0.5], 'relu3_1':[0.5,0.5],"relu4_1":[0.5,0.5],"relu5_1":[0.5,0.5]} # original version
+#STYLE_WEIGHT = {'relu1_1':[0,1], 'relu2_1':[0,1], 'relu3_1':[0,1],"relu4_1":[1,0],"relu5_1":[1,0]} # original version
+HORIZONTAL_MIXING_LAYERS = {"relu1_1","relu2_1","relu3_1"}
 
 try:
     reduce
 except NameError:
     from functools import reduce
 
-def get_normalization_factor(feat_vector):
-    return 1./feat_vector.std()
+def get_normalization_factor(feat_vector, enable_normalization):
+    if enable_normalization:
+        return 1./feat_vector.std()
+    else:
+        return 1.
 
 def get_style_layers_weights(style_layer_weight_exp):
     layer_weight = 1.0
@@ -117,12 +122,13 @@ def get_split_from_layer(layer,i, n):
     return layer[:, h_begin:h_end]
 
 
-def get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights):
+def get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights, enable_split):
     style_loss = 0
     for i in range(len(styles)):
         style_losses = []
         for style_layer in STYLE_LAYERS:
-            layer = net[style_layer]
+            layer = get_split_from_layer(net[style_layer],i,len(styles)) \
+            if enable_split and style_layer not in HORIZONTAL_MIXING_LAYERS else net[style_layer]
             _, height, width, number = map(lambda i: i.value, layer.get_shape())
             size = height * width * number
             feats = tf.reshape(layer, (-1, number))
@@ -160,7 +166,7 @@ def get_edge_loss(image, content_edge, edge_weight):
 
 def stylize(network, initial, initial_noiseblend, content, styles, preserve_colors, iterations,
         content_weight, content_weight_blend, style_weight, color_weight, affine_weight, edge_weight, style_layer_weight_exp, style_blend_weights, tv_weight,
-        learning_rate, beta1, beta2, epsilon, pooling,
+        learning_rate, beta1, beta2, epsilon, pooling, enable_split, enable_normalization,
         print_iterations=None, checkpoint_iterations=None):
     """
     Stylize images.
@@ -179,8 +185,8 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
     if edge_weight!=0: content_edge = get_content_edge(content)
     content_features = get_content_features(shape, vgg_weights, vgg_mean_pixel, pooling, content)
     style_features = get_style_features(styles, vgg_weights, vgg_mean_pixel, pooling)
-    content_normalized_factors = {name:get_normalization_factor(vec) for name,vec in content_features.items()}
-    style_normalized_factors = [{name: get_normalization_factor(vec) for name, vec in style.items()} for style in style_features]
+    content_normalized_factors = {name:get_normalization_factor(vec, enable_normalization) for name,vec in content_features.items()}
+    style_normalized_factors = [{name: get_normalization_factor(vec, enable_normalization) for name, vec in style.items()} for style in style_features]
     print(content_normalized_factors,style_normalized_factors)
     # make stylized image using backpropogation
     with tf.Graph().as_default():
@@ -190,7 +196,7 @@ def stylize(network, initial, initial_noiseblend, content, styles, preserve_colo
         image_pre = image - vgg_mean_pixel
         net = vgg.net_preloaded(vgg_weights, image_pre, pooling)
         content_loss =  get_content_loss(content_weight, content_weight_blend, content_features,content_normalized_factors, net) if content_weight!=0 else 0
-        style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights)
+        style_loss = get_style_loss(styles, net, style_features, style_layers_weights, style_weight, style_normalized_factors, style_blend_weights, enable_split)
         tv_loss = get_tv_loss(image, tv_weight, shape) if tv_weight!=0 else 0
         color_loss = get_color_loss(image,content_gray,color_weight) if color_weight!=0 else 0
         affine_loss = get_affine_loss(image, content_laplacian, affine_weight) if affine_weight!=0 else 0

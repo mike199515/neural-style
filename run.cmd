@@ -1,1 +1,1 @@
-python neural_style.py --content examples/input/in36.png --styles examples/4-style.png examples/1-style.jpg --out out.jpg --style-weight 100 --print-iterations 10 --checkpoint-output checkpoint/%%%s.png --checkpoint-iterations 10
+python neural_style.py --content examples/input/in36.png --styles examples/1-style.jpg  examples/3-style.png  --out out.jpg --style-weight 100 --print-iterations 10 --checkpoint-output checkpoint/%%%s.png --checkpoint-iterations 10 --enable-split

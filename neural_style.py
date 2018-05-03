@@ -112,6 +112,10 @@ def build_parser():
             metavar='INITIAL_NOISEBLEND')
     parser.add_argument('--preserve-colors', action='store_true',
             dest='preserve_colors', help='style-only transfer (preserving colors) - if color transfer is not needed')
+    parser.add_argument('--enable-split', action='store_true',
+            dest='enable_split', help='if we should split the image vertically')
+    parser.add_argument('--disable-normalization', action='store_false',
+            dest="enable_normalization", help='if we should split the image vertically')
     parser.add_argument('--pooling',
             dest='pooling', help='pooling layer configuration: max or avg (default %(default)s)',
             metavar='POOLING', default=POOLING)
@@ -195,6 +199,8 @@ def main():
         beta2=options.beta2,
         epsilon=options.epsilon,
         pooling=options.pooling,
+        enable_split=options.enable_split,
+        enable_normalization=options.enable_normalization,
         print_iterations=options.print_iterations,
         checkpoint_iterations=options.checkpoint_iterations
     ):
